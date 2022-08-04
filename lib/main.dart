@@ -68,11 +68,11 @@ class _MyHomePageState extends State<MyHomePage> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  _eBgColor,
+                  //_eBgColor,
                   _sBgColor,
                   _sBgColor,
-                  _sBgColor,
-                  _eBgColor,
+                  //_sBgColor,
+                  //_eBgColor,
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
@@ -141,13 +141,13 @@ class _MyHomePageState extends State<MyHomePage> {
     var dateString = DateFormat('yyyy-MM-dd').format(now);
     var millisecondsString = DateFormat('S').format(now);
 
-    var hue = ((now.toLocal().millisecondsSinceEpoch / 1000) % 360);
+    double hue = ((now.toLocal().millisecondsSinceEpoch / 1000).floor() % 360);
 
     var startBackgroundColor = HSLColor.fromAHSL(
-      0.4 + Random().nextDouble() * 0.00198,
-      hue,
-      0.5 + Random().nextDouble() * 0.001,
-      0.8 + Random().nextDouble() * 0.001,
+      0.4, // + Random().nextDouble() * 0.00198,
+      hue, // + Random().nextDouble() * 0.00198,
+      0.5, // + Random().nextDouble() * 0.001,
+      0.8, // + Random().nextDouble() * 0.001,
     ).toColor();
 
     setState(() => {
