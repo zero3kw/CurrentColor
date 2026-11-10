@@ -22,7 +22,7 @@
 
     <script>
         // The value below is injected by flutter build, do not touch.
-        var serviceWorkerVersion = '1771377029';
+        const serviceWorkerVersion = "1206675089" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */;
     </script>
     <!-- This script adds the flutter initialization JS code -->
     <script src="flutter.js" defer></script>
@@ -53,6 +53,15 @@
             }).then(function(appRunner) {
                 return appRunner.runApp();
             });
+        });
+
+        // Keep the screen awake (re-acquire after the tab becomes visible again).
+        async function keepAwake() {
+            try { await navigator.wakeLock.request('screen'); } catch (e) {}
+        }
+        keepAwake();
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') keepAwake();
         });
     </script>
 </body>
