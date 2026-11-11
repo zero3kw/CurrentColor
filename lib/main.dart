@@ -90,7 +90,7 @@ class _ClockPageState extends State<ClockPage>
 
   // Background (modes 1/2): fixed perceptual lightness and chroma in OKLCH,
   // so every hue looks equally bright and equally muted.
-  static const _bgL = 0.44;
+  static const _bgL = 0.32;
   static const _bgC = 0.03;
 
   // Text: same hue as the background, with lightness chosen so the WCAG
@@ -263,7 +263,7 @@ class _ClockPageState extends State<ClockPage>
                     alignment: Alignment.topCenter,
                     child: Padding(
                       padding: EdgeInsets.only(top: step(2)),
-                      child: tracked(_date.format(_now), style(0, fg)),
+                      child: tracked(_date.format(_now), style(1, fg)),
                     ),
                   ),
                   Center(
@@ -276,7 +276,7 @@ class _ClockPageState extends State<ClockPage>
                           children: [
                             tracked(_time.format(_now), style(3, fg)),
                             SizedBox(height: step(0)),
-                            tracked(_ms.format(_now), style(0, fg)),
+                            tracked(_ms.format(_now), style(1, fg)),
                           ],
                         ),
                       ),
@@ -287,7 +287,7 @@ class _ClockPageState extends State<ClockPage>
                     child: Padding(
                       padding: EdgeInsets.only(bottom: step(2)),
                       child:
-                          tracked('Color(0xFF$hex)', style(0, fg), _hexWidth),
+                          tracked('Color(0xFF$hex)', style(1, fg), _hexWidth),
                     ),
                   ),
                   if (_wheel)
