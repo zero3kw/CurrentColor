@@ -86,8 +86,6 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages
   fonts:
-    - family: RictyDiminished
+    - family: ShipporiMincho
       fonts:
-        - asset: fonts/RictyDiminished-Regular.ttf
-        - asset: fonts/RictyDiminished-Bold.ttf
-          weight: 700
+        - asset: fonts/ShipporiMincho-Subset.ttf

@@ -7,6 +7,8 @@ import 'package:intl/intl.dart' show DateFormat;
 
 void main() => runApp(const MyApp());
 
+const _font = 'ShipporiMincho';
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -14,7 +16,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Current Color',
-      theme: ThemeData(fontFamily: 'RictyDiminished'),
+      theme: ThemeData(fontFamily: _font),
       home: const MouseRegion(
         cursor: SystemMouseCursors.none,
         child: ClockPage(),
@@ -91,21 +93,26 @@ class _ClockPageState extends State<ClockPage>
   static const _bgL = 0.44;
   static const _bgC = 0.03;
 
-  // Text and frame: same hue as the background, with lightness chosen so the
-  // WCAG contrast ratio against the background is exactly this value.
+  // Text: same hue as the background, with lightness chosen so the WCAG
+  // contrast ratio against the background is exactly this value.
   static const _contrast = 3.0; // WCAG minimum for large text
-  // The frame sits halfway between background and text (contrast is
-  // multiplicative, so halfway is the square root).
-  static final _frameContrast = sqrt(_contrast);
 
   // Hue difference between the top and bottom of the gradient.
   static const _spread = 60.0;
 
   // Type sizes and spacing on a golden-ratio scale: step(n) = base × φⁿ,
-  // where base = screen height / φ⁸, so everything scales with the
-  // screen; the frame is sized by its content.
+  // where base = colored area height / φ⁸, so everything scales with it.
   static const _phi = 1.618;
-  static const _frameMaxWidth = 0.6; // fraction of the screen width
+
+  // The colored area is letterboxed to the cinemascope ratio, always keeping
+  // at least _minBand of the height black at the top and at the bottom.
+  static const _cinema = 2.39;
+  static const _minBand = 0.05;
+
+  // Advances in Shippori Mincho, in em: widest digit ("7") and widest hex
+  // character ("D").
+  static const _digitWidth = 0.545;
+  static const _hexWidth = 0.782;
 
   late final Ticker _ticker;
   DateTime _now = DateTime.now();
@@ -193,74 +200,107 @@ class _ClockPageState extends State<ClockPage>
     final lch = _lchAt(t, 0);
     final bg = oklch(lch);
     final fg = _foreground(bg, lch.h, _contrast);
-    final frame = _foreground(bg, lch.h, _frameContrast);
     final rgb = bg.toARGB32() & 0xFFFFFF;
     final hex = rgb.toRadixString(16).padLeft(6, '0').toUpperCase();
     final size = MediaQuery.sizeOf(context);
-    final base = size.height / pow(_phi, 8);
+    final area = min(size.height * (1 - 2 * _minBand), size.width / _cinema);
+    final base = area / pow(_phi, 8);
     double step(int n) => base * pow(_phi, n);
-    TextStyle style(int n) =>
-        TextStyle(color: fg, fontSize: step(n), height: 1);
+    TextStyle style(int n, Color color) =>
+        // Font set explicitly: the hue wheel paints text directly and does
+        // not inherit the theme.
+        TextStyle(
+            fontFamily: _font, color: color, fontSize: step(n), height: 1);
+    // Wide tracking (half an em between characters). The font has no
+    // tabular figures, so each hex digit sits in a fixed [cell] (in em) to
+    // keep the text from jittering as it changes.
+    Widget tracked(String text, TextStyle s, [double cell = _digitWidth]) {
+      final em = s.fontSize!;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: em / 2,
+        children: [
+          for (final ch in text.split(''))
+            if ('0123456789ABCDEF'.contains(ch))
+              SizedBox(
+                width: em * cell,
+                child: Text(ch, style: s, textAlign: TextAlign.center),
+              )
+            else
+              Text(ch, style: s),
+        ],
+      );
+    }
 
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,
       child: Scaffold(
         backgroundColor: Colors.black,
-        // Black bands (5% of height) above and below the colored area.
-        body: Padding(
-          padding: EdgeInsets.symmetric(vertical: size.height * 0.05),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  oklch(_lchAt(t, -spread / 2)),
-                  oklch(_lchAt(t, spread / 2)),
-                ],
+        body: Center(
+          child: SizedBox(
+            height: area,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    oklch(_lchAt(t, -spread / 2)),
+                    oklch(_lchAt(t, spread / 2)),
+                  ],
+                ),
               ),
-            ),
-            child: Stack(
-              children: [
-                Center(
-                  // The frame hugs its content; on narrow screens the whole
-                  // frame scales down to fit the maximum width.
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                        maxWidth: size.width * _frameMaxWidth),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Container(
-                    // Wider than tall: side padding is the vertical padding × φ³.
-                        padding: EdgeInsets.symmetric(
-                            horizontal: step(5), vertical: step(2)),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: frame, width: step(-4)),
+              child: Stack(
+                children: [
+                  const Positioned.fill(
+                    child: RepaintBoundary(
+                      child: CustomPaint(painter: _Scanlines()),
                     ),
-                      child: Column(
-                        children: [
-                          Text(_date.format(_now), style: style(0)),
-                          Text(_time.format(_now), style: style(2)),
-                          Text(_ms.format(_now), style: style(0)),
-                          SizedBox(height: step(-1)), // separates time from color
-                          Text('Color(0xFF$hex)', style: style(1)),
-                        ],
+                  ),
+                  // Date at the top, color code at the bottom, time centered.
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: EdgeInsets.only(top: step(2)),
+                      child: tracked(_date.format(_now), style(0, fg)),
+                    ),
+                  ),
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: size.width * 0.9),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            tracked(_time.format(_now), style(3, fg)),
+                            SizedBox(height: step(0)),
+                            tracked(_ms.format(_now), style(0, fg)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  ),
-                ),
-                if (_wheel)
-                  Positioned(
-                    right: step(0),
-                    bottom: step(0),
-                    child: CustomPaint(
-                      size: Size.square(step(4)),
-                      painter: _HueWheel(lch.h, spread, bg, fg, style(0)),
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: step(2)),
+                      child:
+                          tracked('Color(0xFF$hex)', style(0, fg), _hexWidth),
                     ),
                   ),
-              ],
+                  if (_wheel)
+                    Positioned(
+                      right: step(0),
+                      bottom: step(0),
+                      child: CustomPaint(
+                        size: Size.square(step(5)),
+                        painter: _HueWheel(lch.h, spread, bg, fg, style(0, fg)),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -292,8 +332,10 @@ class _HueWheel extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // All lengths are in units of 1/160 of the wheel, so it scales as a whole.
+    final u = size.width / 160;
     final c = size.center(Offset.zero);
-    final r = size.width / 2 - 20;
+    final r = size.width / 2 - 20 * u;
     final ring = Rect.fromCircle(center: c, radius: r);
     Offset at(double deg, double radius) =>
         c + Offset(cos(_rad(deg)), sin(_rad(deg))) * radius;
@@ -303,45 +345,71 @@ class _HueWheel extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     // Dim full ring, then the active range at full strength.
-    canvas.drawCircle(c, r, stroke(3)..shader = _sweep(ring, 0.25));
+    canvas.drawCircle(c, r, stroke(3 * u)..shader = _sweep(ring, 0.25));
     if (spread > 0) {
       canvas.drawArc(ring, _rad(hue - spread / 2), spread * pi / 180, false,
-          stroke(3)..shader = _sweep(ring, 1));
+          stroke(3 * u)..shader = _sweep(ring, 1));
     }
 
     // Ticks every 30°, longer at 0°.
     for (var d = 0; d < 360; d += 30) {
       canvas.drawLine(
-        at(d.toDouble(), r + 8),
-        at(d.toDouble(), r + (d == 0 ? 16 : 12)),
-        stroke(1)..color = fg,
+        at(d.toDouble(), r + 8 * u),
+        at(d.toDouble(), r + (d == 0 ? 16 : 12) * u),
+        stroke(u)..color = fg,
       );
     }
 
     // Needle and marker filled with the current background.
-    canvas.drawLine(at(hue, r - 14), at(hue, r + 14), stroke(1.5)..color = fg);
-    canvas.drawCircle(at(hue, r), 6, Paint()..color = bg);
-    canvas.drawCircle(at(hue, r), 6, stroke(1.5)..color = fg);
+    canvas.drawLine(
+        at(hue, r - 14 * u), at(hue, r + 14 * u), stroke(1.5 * u)..color = fg);
+    canvas.drawCircle(at(hue, r), 6 * u, Paint()..color = bg);
+    canvas.drawCircle(at(hue, r), 6 * u, stroke(1.5 * u)..color = fg);
 
     // Caption and degrees in the center.
+    final captionSize = style.fontSize! / 1.618;
+    final tracking = captionSize / 2; // same half-em tracking as the clock
     final caption = TextPainter(
       text: TextSpan(
         text: 'HUE',
-        style: style.copyWith(
-            fontSize: style.fontSize! / 1.618 / 1.618, letterSpacing: 3),
+        style: style.copyWith(fontSize: captionSize, letterSpacing: tracking),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    final label = TextPainter(
-      text: TextSpan(text: '${hue.round() % 360}°', style: style),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    TextPainter text(String s) => TextPainter(
+          text: TextSpan(text: s, style: style),
+          textDirection: TextDirection.ltr,
+        )..layout();
+    final label = text('${hue.round() % 360}');
+    final degree = text('°');
     final top = c.dy - (caption.height + label.height) / 2;
-    caption.paint(canvas, Offset(c.dx - caption.width / 2, top));
-    label.paint(canvas, Offset(c.dx - label.width / 2, top + caption.height));
+    // Tracking trails the last letter, so shift right by half of it.
+    caption.paint(canvas, Offset(c.dx - (caption.width - tracking) / 2, top));
+    // Center the number alone; the degree sign hangs to its right.
+    final labelLeft = c.dx - label.width / 2;
+    label.paint(canvas, Offset(labelLeft, top + caption.height));
+    degree.paint(canvas, Offset(labelLeft + label.width, top + caption.height));
   }
 
   @override
   bool shouldRepaint(_HueWheel old) =>
       old.hue != hue || old.spread != spread || old.bg != bg || old.fg != fg;
+}
+
+/// Faint horizontal scanlines for a film-like texture.
+class _Scanlines extends CustomPainter {
+  const _Scanlines();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+    for (var y = 0.5; y < size.height; y += 3) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_Scanlines old) => false;
 }
