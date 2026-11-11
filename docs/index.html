@@ -1,69 +1,413 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-    <base href="/CurrentColor/">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="What color is it now.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Current Color">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <title>Current Color</title>
 
-    <meta charset="UTF-8">
-    <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-    <meta name="description" content="What color is it now.">
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-D57M8T9ZFC"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-D57M8T9ZFC');
+  </script>
 
-    <!-- iOS meta tags & icons -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <meta name="apple-mobile-web-app-title" content="color_timer">
-    <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <style>
+    /* Shippori Mincho (SIL OFL 1.1), subset to ASCII and the degree sign. */
+    @font-face {
+      font-family: "Shippori Mincho";
+      src: url("fonts/ShipporiMincho-Subset.ttf") format("truetype");
+      font-display: block;
+    }
 
-    <!-- Favicon -->
-    <link rel="icon" type="image/png" href="favicon.png" />
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      cursor: none;
+    }
 
-    <title>Current Color</title>
-    <link rel="manifest" href="manifest.json">
+    /* The colored area, letterboxed and centered. Its size and the type
+       scale (--s0 … --s5) are set from script. */
+    #area {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      font-family: "Shippori Mincho", serif;
+      line-height: 1;
+    }
 
-    <script>
-        // The value below is injected by flutter build, do not touch.
-        const serviceWorkerVersion = "2063077650" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */;
-    </script>
-    <!-- This script adds the flutter initialization JS code -->
-    <script src="flutter.js" defer></script>
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-D57M8T9ZFC"></script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
+    /* Faint horizontal scanlines for a film-like texture. */
+    #area::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.08) 0 1px, transparent 1px 3px);
+    }
 
-        function gtag() {
-            dataLayer.push(arguments);
-        }
-        gtag('js', new Date());
+    /* Wide tracking: half an em between characters. Digits sit in fixed cells
+       (the font has no tabular figures) so the text does not jitter. */
+    .t { display: flex; justify-content: center; gap: 0.5em; }
+    .t .d { width: 0.545em; text-align: center; } /* widest digit "7" */
+    .t .x { width: 0.782em; text-align: center; } /* widest hex char "D" */
 
-        gtag('config', 'G-D57M8T9ZFC');
-    </script>
+    #date, #code { position: absolute; left: 0; right: 0; font-size: var(--s1); }
+    #date { top: var(--s2); }
+    #code { bottom: var(--s2); }
+
+    #mid {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: var(--s0);
+    }
+    #time { font-size: var(--s3); }
+    #ms { font-size: var(--s1); }
+
+    #wheel {
+      position: absolute;
+      right: var(--s0);
+      bottom: var(--s0);
+      width: var(--s5);
+      height: var(--s5);
+    }
+  </style>
 </head>
 
 <body>
-    <script>
-        window.addEventListener('load', function(ev) {
-            // Download main.dart.js
-            _flutter.loader.loadEntrypoint({
-                serviceWorker: {
-                    serviceWorkerVersion: serviceWorkerVersion,
-                }
-            }).then(function(engineInitializer) {
-                return engineInitializer.initializeEngine();
-            }).then(function(appRunner) {
-                return appRunner.runApp();
-            });
-        });
+  <div id="area">
+    <div id="date" class="t"></div>
+    <div id="mid">
+      <div id="time" class="t"></div>
+      <div id="ms" class="t"></div>
+    </div>
+    <div id="code" class="t"></div>
+    <canvas id="wheel" hidden></canvas>
+  </div>
 
-        // Keep the screen awake (re-acquire after the tab becomes visible again).
-        async function keepAwake() {
-            try { await navigator.wakeLock.request('screen'); } catch (e) {}
-        }
-        keepAwake();
-        document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'visible') keepAwake();
-        });
-    </script>
+  <script>
+    // ---- Design constants ------------------------------------------------
+
+    // Background (modes 1/2): fixed perceptual lightness and chroma in OKLCH,
+    // so every hue looks equally bright and equally muted.
+    const BG_L = 0.32;
+    const BG_C = 0.03;
+
+    // Text: same hue as the background, with lightness chosen so the WCAG
+    // contrast ratio against the background is exactly this value.
+    const CONTRAST = 3.0; // WCAG minimum for large text
+
+    // Hue difference between the top and bottom of the gradient.
+    const SPREAD = 60;
+
+    // Type sizes and spacing on a golden-ratio scale: step(n) = base × φⁿ,
+    // where base = colored area height / φ⁸.
+    const PHI = 1.618;
+
+    // The colored area is letterboxed to the cinemascope ratio, always keeping
+    // at least MIN_BAND of the height black at the top and at the bottom.
+    const CINEMA = 2.39;
+    const MIN_BAND = 1 / PHI ** 5; // ≈ 9%, on the same golden-ratio scale
+
+    // Modes, named after jo-ha-kyū (序破急: slow opening, development, rapid
+    // climax), selected with keys 1/2/3 or Q/W/E (physical keys, so they work
+    // regardless of IME state, top row or numpad):
+    //   1 序 Jo:  hue wheel in 6 min, one step per second
+    //   2 破 Ha:  hue wheel in 1 min, continuous
+    //   3 急 Kyū: random color every second (any hue and lightness, chroma up
+    //             to the edge of Display P3), blending smoothly into the next
+    const PERIODS = [360, 60]; // seconds per turn for modes 1 and 2
+    const KEYS = [
+      ['Digit1', 'Numpad1', 'KeyQ'],
+      ['Digit2', 'Numpad2', 'KeyW'],
+      ['Digit3', 'Numpad3', 'KeyE'],
+    ];
+
+    let mode = 0;
+    let gradient = false; // toggled with the G key
+
+    // Temporal dithering for 8-bit displays (add ?dither to the URL). Each
+    // frame rounds every channel up or down at random, weighted by its
+    // fraction, so the average over frames shows the in-between color.
+    // Leave it off on 10-bit wide-gamut displays, where OKLCH is painted
+    // directly.
+    const DITHER = new URLSearchParams(location.search).has('dither');
+
+    // ---- Color -------------------------------------------------------------
+
+    // OKLCH → linear sRGB (https://bottosson.github.io/posts/oklab/),
+    // unclamped, so values outside 0–1 mean the color is outside sRGB.
+    function toLinearRaw({ l, c, h }) {
+      const a = c * Math.cos(h * Math.PI / 180);
+      const b = c * Math.sin(h * Math.PI / 180);
+      const L = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+      const M = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+      const S = (l - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+      return [
+        4.0767416621 * L - 3.3077115913 * M + 0.2309699292 * S,
+        -1.2684380046 * L + 2.6097574011 * M - 0.3413193965 * S,
+        -0.0041960863 * L - 0.7034186147 * M + 1.7076147010 * S,
+      ];
+    }
+
+    // OKLCH → linear sRGB, clamped to the sRGB gamut.
+    const toLinear = lch => toLinearRaw(lch).map(v => Math.min(1, Math.max(0, v)));
+
+    // Whether an OKLCH color fits in the Display P3 gamut.
+    function inP3(lch) {
+      const [r, g, b] = toLinearRaw(lch);
+      return [ // linear sRGB → linear Display P3
+        0.8224621 * r + 0.1775380 * g,
+        0.0331941 * r + 0.9668058 * g,
+        0.0170827 * r + 0.0723974 * g + 0.9105199 * b,
+      ].every(v => v >= -1e-6 && v <= 1 + 1e-6);
+    }
+
+    // Largest chroma at this lightness and hue that Display P3 can show.
+    function maxChroma(l, h) {
+      let lo = 0, hi = 0.4;
+      for (let i = 0; i < 16; i++) {
+        const c = (lo + hi) / 2;
+        if (inP3({ l, c, h })) lo = c; else hi = c;
+      }
+      return lo;
+    }
+
+    // OKLCH → sRGB channels on a 0–255 scale, not yet rounded.
+    const srgb255 = lch => toLinear(lch)
+      .map(v => (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055) * 255);
+
+    // 8-bit sRGB hex, as shown in the color code.
+    const hex = lch => srgb255(lch)
+      .map(v => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+
+    // The browser paints OKLCH directly, without rounding to 8-bit sRGB first.
+    const css = ({ l, c, h }, alpha = 1) => `oklch(${l} ${c} ${h} / ${alpha})`;
+
+    // Background paint: OKLCH as is, or a dithered 8-bit sRGB color.
+    const paint = lch => DITHER
+      ? `rgb(${srgb255(lch).map(x => Math.floor(x) + (Math.random() < x % 1 ? 1 : 0)).join(' ')})`
+      : css(lch);
+
+    // Foreground of the same hue whose contrast against [bg] is CONTRAST.
+    // Uses Y ≈ L³, which holds closely at this low chroma.
+    function foreground(bg) {
+      const [r, g, b] = toLinear(bg);
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      return { l: Math.cbrt(CONTRAST * (y + 0.05) - 0.05), c: BG_C, h: bg.h };
+    }
+
+    const wrap = h => ((h % 360) + 360) % 360;
+
+    // Random color for a given second, seeded by it so every device agrees.
+    function random(second) {
+      let s = second >>> 0; // mulberry32
+      const next = () => {
+        s = (s + 0x6D2B79F5) >>> 0;
+        let t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      // Chroma reaches up to the edge of Display P3, so wide-gamut displays
+      // show the most vivid colors; other displays map them into their gamut.
+      const h = next() * 360, l = 0.25 + 0.35 * next();
+      return { h, l, c: maxChroma(l, h) * next() };
+    }
+
+    // Hue in degrees for modes 1/2: mode 1 steps once per second,
+    // mode 2 changes continuously.
+    function wheelHue(t) {
+      const p = PERIODS[mode];
+      const s = mode === 0 ? Math.floor(t) : t;
+      return (s % p) * 360 / p;
+    }
+
+    // Background at time t (seconds since epoch), shifted by dh degrees of hue
+    // (modes 1/2) or the equivalent fraction of a second (mode 3).
+    function lchAt(t, dh) {
+      if (mode === 2) {
+        // Map the ±SPREAD/2 degree gradient offset to ±1/4 of a second.
+        const x = t + dh / (2 * SPREAD);
+        const n = Math.floor(x);
+        const f = x - n;
+        const a = random(n), b = random(n + 1);
+        const turn = ((b.h - a.h + 540) % 360) - 180; // shortest way round
+        return {
+          l: a.l + (b.l - a.l) * f,
+          c: a.c + (b.c - a.c) * f,
+          h: wrap(a.h + turn * f),
+        };
+      }
+      return { l: BG_L, c: BG_C, h: wrap(wheelHue(t) + dh) };
+    }
+
+    // ---- Layout ------------------------------------------------------------
+
+    const area = document.getElementById('area');
+    const canvas = document.getElementById('wheel');
+    let step;
+
+    function layout() {
+      const w = innerWidth, h = innerHeight;
+      const height = Math.min(h * (1 - 2 * MIN_BAND), w / CINEMA);
+      const base = height / PHI ** 8;
+      step = n => base * PHI ** n;
+      area.style.height = height + 'px';
+      for (let n = 0; n <= 5; n++) area.style.setProperty(`--s${n}`, step(n) + 'px');
+    }
+    addEventListener('resize', layout);
+    layout();
+
+    // Render text one character per span; digits (and hex characters, in the
+    // color code) get fixed-width cells.
+    function set(el, text, hexCells = false) {
+      if (el.dataset.text === text) return;
+      el.dataset.text = text;
+      el.innerHTML = [...text].map(ch => {
+        if (hexCells && /[0-9A-F]/.test(ch)) return `<span class="x">${ch}</span>`;
+        if (/[0-9]/.test(ch)) return `<span class="d">${ch}</span>`;
+        return `<span>${ch}</span>`;
+      }).join('');
+    }
+
+    // ---- Hue wheel ---------------------------------------------------------
+
+    // Hue wheel (0° at the top, clockwise, OKLCH hue): a dim ring with the
+    // range shown on screen lit up, ticks every 30°, and a needle at the
+    // current hue. All lengths are in units of 1/160 of the wheel.
+    function drawWheel(spread, bg, fg) {
+      const hue = bg.h;
+      const ctx = canvas.getContext('2d');
+      // Sized here, not on resize: devicePixelRatio changes without a resize
+      // when the window moves between a 1x and a 2x display.
+      const size = Math.round(step(5) * devicePixelRatio);
+      if (canvas.width !== size) canvas.width = canvas.height = size;
+      const u = size / 160;
+      const c = size / 2;
+      const r = c - 20 * u;
+      const rad = deg => (deg - 90) * Math.PI / 180;
+      const at = (deg, radius) => [c + Math.cos(rad(deg)) * radius, c + Math.sin(rad(deg)) * radius];
+      const line = (p, q, width, color) => {
+        ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q);
+        ctx.lineWidth = width; ctx.strokeStyle = color; ctx.stroke();
+      };
+      const sweep = alpha => {
+        const g = ctx.createConicGradient(-Math.PI / 2, c, c);
+        for (let h = 0; h <= 360; h += 30) g.addColorStop(h / 360, css({ l: 0.7, c: 0.12, h: h % 360 }, alpha));
+        return g;
+      };
+
+      ctx.clearRect(0, 0, size, size);
+      ctx.lineCap = 'round';
+
+      // Dim full ring, then the active range at full strength.
+      ctx.beginPath(); ctx.arc(c, c, r, 0, 2 * Math.PI);
+      ctx.lineWidth = 3 * u; ctx.strokeStyle = sweep(0.25); ctx.stroke();
+      if (spread > 0) {
+        ctx.beginPath(); ctx.arc(c, c, r, rad(hue - spread / 2), rad(hue + spread / 2));
+        ctx.strokeStyle = sweep(1); ctx.stroke();
+      }
+
+      // Ticks every 30°, longer at 0°.
+      for (let d = 0; d < 360; d += 30) line(at(d, r + 8 * u), at(d, r + (d === 0 ? 16 : 12) * u), u, css(fg));
+
+      // Needle and marker filled with the current background.
+      line(at(hue, r - 14 * u), at(hue, r + 14 * u), 1.5 * u, css(fg));
+      ctx.beginPath(); ctx.arc(...at(hue, r), 6 * u, 0, 2 * Math.PI);
+      ctx.fillStyle = css(bg); ctx.fill();
+      ctx.lineWidth = 1.5 * u; ctx.strokeStyle = css(fg); ctx.stroke();
+
+      // Caption (tracked like the clock) and degrees in the center; the number
+      // alone is centered and the degree sign hangs to its right.
+      const labelSize = step(0) * devicePixelRatio;
+      const captionSize = labelSize / PHI;
+      const tracking = captionSize / 2;
+      ctx.fillStyle = css(fg);
+      ctx.textBaseline = 'top';
+      ctx.font = `${captionSize}px "Shippori Mincho", serif`;
+      const letters = [...'HUE'];
+      const widths = letters.map(ch => ctx.measureText(ch).width);
+      const captionWidth = widths.reduce((s, w) => s + w, 0) + tracking * (letters.length - 1);
+      const top = c - (captionSize + labelSize) / 2;
+      let x = c - captionWidth / 2;
+      letters.forEach((ch, i) => { ctx.fillText(ch, x, top); x += widths[i] + tracking; });
+      ctx.font = `${labelSize}px "Shippori Mincho", serif`;
+      const number = String(Math.round(hue) % 360);
+      const width = ctx.measureText(number).width;
+      const left = c - width / 2;
+      ctx.fillText(number, left, top + captionSize);
+      ctx.fillText('°', left + width, top + captionSize);
+    }
+
+    // ---- Frame -------------------------------------------------------------
+
+    const els = Object.fromEntries(['date', 'time', 'ms', 'code'].map(id => [id, document.getElementById(id)]));
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    let lastBackground, lastColor;
+
+    function frame() {
+      requestAnimationFrame(frame); // first, so an exception cannot stop the clock
+      const now = new Date();
+      const t = now.getTime() / 1000;
+      const spread = gradient ? SPREAD : 0;
+      const bg = lchAt(t, 0);
+      const fg = foreground(bg);
+
+      // Write styles only when they change (mode 1 changes once per second).
+      const background = spread
+        ? `linear-gradient(in oklch, ${paint(lchAt(t, -spread / 2))}, ${paint(lchAt(t, spread / 2))})`
+        : paint(bg);
+      if (background !== lastBackground) area.style.background = lastBackground = background;
+      const color = css(fg);
+      if (color !== lastColor) area.style.color = lastColor = color;
+
+      set(els.date, `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+      set(els.time, `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
+      set(els.ms, `.${pad(now.getMilliseconds(), 3)}`);
+      // The color code updates only when the seconds tick, so it changes in
+      // step with the clock even while the background moves continuously.
+      set(els.code, `Color(0x${hex(lchAt(Math.floor(t), 0))})`, true);
+
+      if (!canvas.hidden) drawWheel(spread, bg, fg);
+    }
+    requestAnimationFrame(frame);
+
+    // ---- Input -------------------------------------------------------------
+
+    addEventListener('keydown', e => {
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      const i = KEYS.findIndex(k => k.includes(e.code));
+      if (i >= 0) mode = i;
+      else if (e.code === 'KeyG') gradient = !gradient;
+      else if (e.code === 'KeyH') canvas.hidden = !canvas.hidden; // hue wheel
+    });
+
+    // ---- Kiosk -------------------------------------------------------------
+
+    // Keep the screen awake (re-acquire after the tab becomes visible again).
+    const keepAwake = () => navigator.wakeLock?.request('screen').catch(() => {});
+    keepAwake();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') keepAwake();
+    });
+
+  </script>
 </body>
 
 </html>
