@@ -12,7 +12,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(color: Colors.white70);
+    const style = TextStyle(color: Colors.white38);
     return MaterialApp(
       title: 'Current Color',
       theme: ThemeData(
