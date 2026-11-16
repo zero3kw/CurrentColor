@@ -14,11 +14,12 @@
   <title>Current Color</title>
 
   <!-- Google tag -->
-  <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-54VVQBQZ"></script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-RH2X78RBSQ"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag() { dataLayer.push(arguments); }
     gtag('js', new Date());
+    gtag('config', 'G-RH2X78RBSQ');
   </script>
 
   <style>
@@ -392,10 +393,15 @@
     addEventListener('keydown', e => {
       if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
       const i = KEYS.findIndex(k => k.includes(e.code));
-      if (i >= 0) mode = i;
-      else if (e.code === 'KeyG') gradient = !gradient;
-      else if (e.code === 'KeyH') canvas.hidden = !canvas.hidden; // hue wheel
+      if (i >= 0) log('mode', ['jo', 'ha', 'kyu'][mode = i]);
+      else if (e.code === 'KeyG') log('gradient', gradient = !gradient);
+      else if (e.code === 'KeyH') log('hue_wheel', !(canvas.hidden = !canvas.hidden));
     });
+
+    // Report a setting change to Google Analytics, named as in the apps.
+    function log(setting, value) {
+      gtag('event', 'set_' + setting, { value: String(value) });
+    }
 
     // ---- Kiosk -------------------------------------------------------------
 
